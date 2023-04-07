@@ -92,18 +92,13 @@ func parseCgroupProcsFile(path string) ([]uint64, error) {
 	return out, nil
 }
 
-func parseKV(raw string) (string, interface{}, error) {
+func parseKV(raw string) (string, string, error) {
 	parts := strings.Fields(raw)
 	switch len(parts) {
 	case 2:
-		v, err := parseUint(parts[1], 10, 64)
-		if err != nil {
-			// if we cannot parse as a uint, parse as a string
-			return parts[0], parts[1], nil
-		}
-		return parts[0], v, nil
+		return parts[0], parts[1], nil
 	default:
-		return "", 0, ErrInvalidFormat
+		return "", "", ErrInvalidFormat
 	}
 }
 

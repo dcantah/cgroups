@@ -26,14 +26,14 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func checkCgroupMode(t *testing.T) {
+func checkCgroupMode(tb testing.TB) {
 	var st unix.Statfs_t
 	if err := unix.Statfs(defaultCgroup2Path, &st); err != nil {
-		t.Fatal("cannot statfs cgroup root")
+		tb.Fatal("cannot statfs cgroup root")
 	}
 	isUnified := st.Type == unix.CGROUP2_SUPER_MAGIC
 	if !isUnified {
-		t.Skip("System running in hybrid or cgroupv1 mode")
+		tb.Skip("System running in hybrid or cgroupv1 mode")
 	}
 }
 

@@ -528,7 +528,10 @@ func (c *Manager) Stat() (*stats.Metrics, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]interface{})
+	// Sizing this avoids an allocation to increase the map at runtime;
+	// currently the default bucket size is 8 and we put 40+ elements
+	// in it so we'd always end up allocating.
+	out := make(map[string]string, 50)
 	for _, controller := range controllers {
 		switch controller {
 		case "cpu", "memory":
@@ -548,14 +551,14 @@ func (c *Manager) Stat() (*stats.Metrics, error) {
 			return nil, err
 		}
 	}
-	memoryEvents := make(map[string]interface{})
+	memoryEvents := make(map[string]string)
 	if err := readKVStatsFile(c.path, "memory.events", memoryEvents); err != nil {
 		if !os.IsNotExist(err) {
 			return nil, err
 		}
 	}
-	var metrics stats.Metrics
 
+	var metrics stats.Metrics
 	metrics.Pids = &stats.PidsStat{
 		Current: getPidValue("pids.current", out),
 		Limit:   getPidValue("pids.max", out),
@@ -624,35 +627,34 @@ func (c *Manager) Stat() (*stats.Metrics, error) {
 	return &metrics, nil
 }
 
-func getUint64Value(key string, out map[string]interface{}) uint64 {
+func getUint64Value(key string, out map[string]string) uint64 {
 	v, ok := out[key]
 	if !ok {
 		return 0
 	}
-	switch t := v.(type) {
-	case uint64:
-		return t
+	val, err := parseUint(v, 10, 64)
+	if err != nil {
+		return 0
 	}
-	return 0
+	return val
 }
 
-func getPidValue(key string, out map[string]interface{}) uint64 {
+func getPidValue(key string, out map[string]string) uint64 {
 	v, ok := out[key]
 	if !ok {
 		return 0
 	}
-	switch t := v.(type) {
-	case uint64:
-		return t
-	case string:
-		if t == "max" {
-			return math.MaxUint64
-		}
+	if v == "max" {
+		return math.MaxUint64
 	}
-	return 0
+	val, err := parseUint(v, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return val
 }
 
-func readSingleFile(path string, file string, out map[string]interface{}) error {
+func readSingleFile(path string, file string, out map[string]string) error {
 	f, err := os.Open(filepath.Join(path, file))
 	if err != nil {
 		return err
@@ -667,20 +669,11 @@ func readSingleFile(path string, file string, out map[string]interface{}) error 
 		return err
 	}
 
-	s := strings.TrimSpace(string(buf[:n]))
-	v, err := parseUint(s, 10, 64)
-	if err != nil {
-		// If we cannot parse as a uint, parse as a string.
-		// This can happen if a limit is set to "max" (common for
-		// pids.max and others).
-		out[file] = s
-		return nil
-	}
-	out[file] = v
+	out[file] = strings.TrimSpace(string(buf[:n]))
 	return nil
 }
 
-func readKVStatsFile(path string, file string, out map[string]interface{}) error {
+func readKVStatsFile(path string, file string, out map[string]string) error {
 	f, err := os.Open(filepath.Join(path, file))
 	if err != nil {
 		return err
@@ -725,18 +718,11 @@ func (c *Manager) freeze(path string, state State) error {
 
 func (c *Manager) isCgroupEmpty() bool {
 	// In case of any error we return true so that we exit and don't leak resources
-	out := make(map[string]interface{})
+	out := make(map[string]string)
 	if err := readKVStatsFile(c.path, "cgroup.events", out); err != nil {
 		return true
 	}
-	if v, ok := out["populated"]; ok {
-		populated, ok := v.(uint64)
-		if !ok {
-			return true
-		}
-		return populated == 0
-	}
-	return true
+	return out["populated"] == "0"
 }
 
 // MemoryEventFD returns inotify file descriptor and 'memory.events' inotify watch descriptor
@@ -769,37 +755,42 @@ func (c *Manager) EventChan() (<-chan Event, <-chan error) {
 	return ec, errCh
 }
 
-func parseMemoryEvents(out map[string]interface{}) (Event, error) {
+func parseMemoryEvents(out map[string]string) (Event, error) {
 	e := Event{}
 	if v, ok := out["high"]; ok {
-		e.High, ok = v.(uint64)
-		if !ok {
+		val, err := parseUint(v, 10, 64)
+		if err != nil {
 			return Event{}, fmt.Errorf("cannot convert high to uint64: %+v", v)
 		}
+		e.High = val
 	}
 	if v, ok := out["low"]; ok {
-		e.Low, ok = v.(uint64)
-		if !ok {
+		val, err := parseUint(v, 10, 64)
+		if err != nil {
 			return Event{}, fmt.Errorf("cannot convert low to uint64: %+v", v)
 		}
+		e.Low = val
 	}
 	if v, ok := out["max"]; ok {
-		e.Max, ok = v.(uint64)
-		if !ok {
+		val, err := parseUint(v, 10, 64)
+		if err != nil {
 			return Event{}, fmt.Errorf("cannot convert max to uint64: %+v", v)
 		}
+		e.Max = val
 	}
 	if v, ok := out["oom"]; ok {
-		e.OOM, ok = v.(uint64)
-		if !ok {
+		val, err := parseUint(v, 10, 64)
+		if err != nil {
 			return Event{}, fmt.Errorf("cannot convert oom to uint64: %+v", v)
 		}
+		e.OOM = val
 	}
 	if v, ok := out["oom_kill"]; ok {
-		e.OOMKill, ok = v.(uint64)
-		if !ok {
+		val, err := parseUint(v, 10, 64)
+		if err != nil {
 			return Event{}, fmt.Errorf("cannot convert oom_kill to uint64: %+v", v)
 		}
+		e.OOMKill = val
 	}
 	return e, nil
 }
@@ -822,7 +813,7 @@ func (c *Manager) waitForEvents(ec chan<- Event, errCh chan<- error) {
 			return
 		}
 		if bytesRead >= unix.SizeofInotifyEvent {
-			out := make(map[string]interface{})
+			out := make(map[string]string)
 			if err := readKVStatsFile(c.path, "memory.events", out); err != nil {
 				// When cgroup is deleted read may return -ENODEV instead of -ENOENT from open.
 				if _, statErr := os.Lstat(filepath.Join(c.path, "memory.events")); !os.IsNotExist(statErr) {

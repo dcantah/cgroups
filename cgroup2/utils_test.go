@@ -76,7 +76,7 @@ func BenchmarkReaduint64(b *testing.B) {
 func BenchmarkReadSingleFile(b *testing.B) {
 	b.ReportAllocs()
 
-	out := make(map[string]interface{})
+	out := make(map[string]string)
 	for i := 0; i < b.N; i++ {
 		if err := readSingleFile("/proc/self/loginuid", "", out); err != nil {
 			b.Fatal(err)
