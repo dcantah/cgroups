@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -659,14 +658,21 @@ func readSingleFile(path string, file string, out map[string]interface{}) error 
 		return err
 	}
 	defer f.Close()
-	data, err := io.ReadAll(f)
+
+	// We expect an unsigned 64 bit integer, or a "max" string
+	// in some cases.
+	buf := make([]byte, 32)
+	n, err := f.Read(buf)
 	if err != nil {
 		return err
 	}
-	s := strings.TrimSpace(string(data))
+
+	s := strings.TrimSpace(string(buf[:n]))
 	v, err := parseUint(s, 10, 64)
 	if err != nil {
-		// if we cannot parse as a uint, parse as a string
+		// If we cannot parse as a uint, parse as a string.
+		// This can happen if a limit is set to "max" (common for
+		// pids.max and others).
 		out[file] = s
 		return nil
 	}

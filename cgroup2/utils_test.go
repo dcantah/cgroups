@@ -64,3 +64,22 @@ func TestToResources(t *testing.T) {
 	v2resources2 := ToResources(&res2)
 	assert.Equal(t, CPUMax("max 10000"), v2resources2.CPU.Max)
 }
+
+func BenchmarkReaduint64(b *testing.B) {
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		_ = getStatFileContentUint64("/proc/self/loginuid")
+	}
+}
+
+func BenchmarkReadSingleFile(b *testing.B) {
+	b.ReportAllocs()
+
+	out := make(map[string]interface{})
+	for i := 0; i < b.N; i++ {
+		if err := readSingleFile("/proc/self/loginuid", "", out); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
